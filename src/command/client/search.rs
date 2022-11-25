@@ -2,7 +2,9 @@ use clap::Parser;
 use eyre::Result;
 
 use atuin_client::{
-    database::{current_context, OptFilters}, database::Database, settings::Settings,
+    database::Database,
+    database::{current_context, OptFilters},
+    settings::Settings,
 };
 
 use super::history::ListMode;
