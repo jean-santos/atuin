@@ -481,28 +481,28 @@ impl Database for Sqlite {
             None => (None, None, None, None, None, None),
         };
 
-        exit.and_then(|exit| Some(sql.and_where_eq("exit", exit)));
+        exit.map(|exit| Some(sql.and_where_eq("exit", exit)));
 
-        exclude_exit.and_then(|exclude_exit| Some(sql.and_where_ne("exit", exclude_exit)));
+        exclude_exit.map(|exclude_exit| Some(sql.and_where_ne("exit", exclude_exit)));
 
-        cwd.and_then(|cwd| Some(sql.and_where_eq("cwd", quote(cwd))));
+        cwd.map(|cwd| Some(sql.and_where_eq("cwd", quote(cwd))));
 
-        exclude_cwd.and_then(|exclude_cwd| Some(sql.and_where_ne("cwd", quote(exclude_cwd))));
+        exclude_cwd.map(|exclude_cwd| Some(sql.and_where_ne("cwd", quote(exclude_cwd))));
 
-        before.and_then(|before| {
+        before.map(|before| {
             Some(
                 interim::parse_date_string(before.as_str(), Utc::now(), interim::Dialect::Uk)
-                    .and_then(|before| {
-                        Ok(sql.and_where_lt("timestamp", quote(before.timestamp_nanos())))
+                    .map(|before| {
+                        sql.and_where_lt("timestamp", quote(before.timestamp_nanos()))
                     }),
             )
         });
 
-        after.and_then(|after| {
+        after.map(|after| {
             Some(
                 interim::parse_date_string(after.as_str(), Utc::now(), interim::Dialect::Uk)
-                    .and_then(|after| {
-                        Ok(sql.and_where_gt("timestamp", quote(after.timestamp_nanos())))
+                    .map(|after| {
+                        sql.and_where_gt("timestamp", quote(after.timestamp_nanos()))
                     }),
             )
         });
