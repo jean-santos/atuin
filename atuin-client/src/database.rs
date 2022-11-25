@@ -490,21 +490,13 @@ impl Database for Sqlite {
         exclude_cwd.map(|exclude_cwd| Some(sql.and_where_ne("cwd", quote(exclude_cwd))));
 
         before.map(|before| {
-            Some(
-                interim::parse_date_string(before.as_str(), Utc::now(), interim::Dialect::Uk)
-                    .map(|before| {
-                        sql.and_where_lt("timestamp", quote(before.timestamp_nanos()))
-                    }),
-            )
+            interim::parse_date_string(before.as_str(), Utc::now(), interim::Dialect::Uk)
+                .map(|before| sql.and_where_lt("timestamp", quote(before.timestamp_nanos())))
         });
 
         after.map(|after| {
-            Some(
-                interim::parse_date_string(after.as_str(), Utc::now(), interim::Dialect::Uk)
-                    .map(|after| {
-                        sql.and_where_gt("timestamp", quote(after.timestamp_nanos()))
-                    }),
-            )
+            interim::parse_date_string(after.as_str(), Utc::now(), interim::Dialect::Uk)
+                .map(|after| sql.and_where_gt("timestamp", quote(after.timestamp_nanos())))
         });
 
         let query = sql.sql().expect("bug in search query. please report");
