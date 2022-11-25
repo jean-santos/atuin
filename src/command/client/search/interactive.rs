@@ -54,8 +54,15 @@ impl State {
             db.list(self.filter_mode, &self.context, Some(200), true)
                 .await?
         } else {
-            db.search(Some(200), search_mode, self.filter_mode, &self.context, i)
-                .await?
+            db.search(
+                Some(200),
+                search_mode,
+                self.filter_mode,
+                &self.context,
+                i,
+                None,
+            )
+            .await?
         };
 
         self.results_state.select(0);

@@ -1,9 +1,8 @@
-use chrono::Utc;
 use clap::Parser;
 use eyre::Result;
 
 use atuin_client::{
-    database::current_context, database::Database, history::History, settings::Settings,
+    database::{current_context, OptFilters}, database::Database, settings::Settings,
 };
 
 use super::history::ListMode;
@@ -117,6 +116,15 @@ async fn run_non_interactive(
 
     let context = current_context();
 
+    let opt_filter = OptFilters {
+        exit,
+        exclude_exit,
+        cwd: dir,
+        exclude_cwd,
+        before,
+        after,
+    };
+
     let results = db
         .search(
             limit,
@@ -124,60 +132,9 @@ async fn run_non_interactive(
             settings.filter_mode,
             &context,
             query.join(" ").as_str(),
+            Some(opt_filter),
         )
         .await?;
-
-    // TODO: This filtering would be better done in the SQL query, I just
-    // need a nice way of building queries.
-    let results: Vec<History> = results
-        .iter()
-        .filter(|h| {
-            if let Some(exit) = exit {
-                if h.exit != exit {
-                    return false;
-                }
-            }
-
-            if let Some(exit) = exclude_exit {
-                if h.exit == exit {
-                    return false;
-                }
-            }
-
-            if let Some(cwd) = &exclude_cwd {
-                if h.cwd.as_str() == cwd.as_str() {
-                    return false;
-                }
-            }
-
-            if let Some(cwd) = &dir {
-                if h.cwd.as_str() != cwd.as_str() {
-                    return false;
-                }
-            }
-
-            if let Some(before) = &before {
-                let before =
-                    interim::parse_date_string(before.as_str(), Utc::now(), interim::Dialect::Uk);
-
-                if before.is_err() || h.timestamp.gt(&before.unwrap()) {
-                    return false;
-                }
-            }
-
-            if let Some(after) = &after {
-                let after =
-                    interim::parse_date_string(after.as_str(), Utc::now(), interim::Dialect::Uk);
-
-                if after.is_err() || h.timestamp.lt(&after.unwrap()) {
-                    return false;
-                }
-            }
-
-            true
-        })
-        .map(std::borrow::ToOwned::to_owned)
-        .collect();
 
     super::history::print_list(&results, list_mode);
     Ok(results.len())

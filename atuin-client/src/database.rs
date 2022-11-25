@@ -25,6 +25,15 @@ pub struct Context {
     hostname: String,
 }
 
+pub struct OptFilters {
+    pub exit: Option<i64>,
+    pub exclude_exit: Option<i64>,
+    pub cwd: Option<String>,
+    pub exclude_cwd: Option<String>,
+    pub before: Option<String>,
+    pub after: Option<String>,
+}
+
 pub fn current_context() -> Context {
     let session =
         env::var("ATUIN_SESSION").expect("failed to find ATUIN_SESSION - check your shell setup");
@@ -76,6 +85,7 @@ pub trait Database: Send + Sync {
         filter: FilterMode,
         context: &Context,
         query: &str,
+        opt_filter: Option<OptFilters>,
     ) -> Result<Vec<History>>;
 
     async fn query_history(&self, query: &str) -> Result<Vec<History>>;
@@ -388,6 +398,7 @@ impl Database for Sqlite {
         filter: FilterMode,
         context: &Context,
         query: &str,
+        opt_filter: Option<OptFilters>,
     ) -> Result<Vec<History>> {
         let mut sql = SqlBuilder::select_from("history");
 
@@ -458,6 +469,44 @@ impl Database for Sqlite {
             }
         };
 
+        let (exit, exclude_exit, cwd, exclude_cwd, before, after) = match opt_filter {
+            Some(opts) => (
+                opts.exit,
+                opts.exclude_exit,
+                opts.cwd,
+                opts.exclude_cwd,
+                opts.before,
+                opts.after,
+            ),
+            None => (None, None, None, None, None, None),
+        };
+
+        exit.and_then(|exit| Some(sql.and_where_eq("exit", exit)));
+
+        exclude_exit.and_then(|exclude_exit| Some(sql.and_where_ne("exit", exclude_exit)));
+
+        cwd.and_then(|cwd| Some(sql.and_where_eq("cwd", quote(cwd))));
+
+        exclude_cwd.and_then(|exclude_cwd| Some(sql.and_where_ne("cwd", quote(exclude_cwd))));
+
+        before.and_then(|before| {
+            Some(
+                interim::parse_date_string(before.as_str(), Utc::now(), interim::Dialect::Uk)
+                    .and_then(|before| {
+                        Ok(sql.and_where_lt("timestamp", quote(before.timestamp_nanos())))
+                    }),
+            )
+        });
+
+        after.and_then(|after| {
+            Some(
+                interim::parse_date_string(after.as_str(), Utc::now(), interim::Dialect::Uk)
+                    .and_then(|after| {
+                        Ok(sql.and_where_gt("timestamp", quote(after.timestamp_nanos())))
+                    }),
+            )
+        });
+
         let query = sql.sql().expect("bug in search query. please report");
 
         let res = sqlx::query(&query)
@@ -496,7 +545,9 @@ mod test {
             cwd: "/home/ellie".to_string(),
         };
 
-        let results = db.search(None, mode, filter_mode, &context, query).await?;
+        let results = db
+            .search(None, mode, filter_mode, &context, query, None)
+            .await?;
 
         assert_eq!(
             results.len(),
@@ -699,7 +750,14 @@ mod test {
         }
         let start = Instant::now();
         let _results = db
-            .search(None, SearchMode::Fuzzy, FilterMode::Global, &context, "")
+            .search(
+                None,
+                SearchMode::Fuzzy,
+                FilterMode::Global,
+                &context,
+                "",
+                None,
+            )
             .await
             .unwrap();
         let duration = start.elapsed();
