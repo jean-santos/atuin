@@ -25,6 +25,7 @@ pub struct Context {
     hostname: String,
 }
 
+#[derive(Default)]
 pub struct OptFilters {
     pub exit: Option<i64>,
     pub exclude_exit: Option<i64>,
@@ -32,6 +33,7 @@ pub struct OptFilters {
     pub exclude_cwd: Option<String>,
     pub before: Option<String>,
     pub after: Option<String>,
+    pub limit: Option<i64>,
 }
 
 pub fn current_context() -> Context {
@@ -80,12 +82,11 @@ pub trait Database: Send + Sync {
 
     async fn search(
         &self,
-        limit: Option<i64>,
         search_mode: SearchMode,
         filter: FilterMode,
         context: &Context,
         query: &str,
-        opt_filter: Option<OptFilters>,
+        filter_options: OptFilters,
     ) -> Result<Vec<History>>;
 
     async fn query_history(&self, query: &str) -> Result<Vec<History>>;
@@ -393,12 +394,11 @@ impl Database for Sqlite {
 
     async fn search(
         &self,
-        limit: Option<i64>,
         search_mode: SearchMode,
         filter: FilterMode,
         context: &Context,
         query: &str,
-        opt_filter: Option<OptFilters>,
+        filter_options: OptFilters,
     ) -> Result<Vec<History>> {
         let mut sql = SqlBuilder::select_from("history");
 
@@ -406,7 +406,7 @@ impl Database for Sqlite {
             .having("max(timestamp)")
             .order_desc("timestamp");
 
-        if let Some(limit) = limit {
+        if let Some(limit) = filter_options.limit {
             sql.limit(limit);
         }
 
@@ -469,32 +469,28 @@ impl Database for Sqlite {
             }
         };
 
-        let (exit, exclude_exit, cwd, exclude_cwd, before, after) = match opt_filter {
-            Some(opts) => (
-                opts.exit,
-                opts.exclude_exit,
-                opts.cwd,
-                opts.exclude_cwd,
-                opts.before,
-                opts.after,
-            ),
-            None => (None, None, None, None, None, None),
-        };
+        filter_options
+            .exit
+            .map(|exit| Some(sql.and_where_eq("exit", exit)));
 
-        exit.map(|exit| Some(sql.and_where_eq("exit", exit)));
+        filter_options
+            .exclude_exit
+            .map(|exclude_exit| Some(sql.and_where_ne("exit", exclude_exit)));
 
-        exclude_exit.map(|exclude_exit| Some(sql.and_where_ne("exit", exclude_exit)));
+        filter_options
+            .cwd
+            .map(|cwd| Some(sql.and_where_eq("cwd", quote(cwd))));
 
-        cwd.map(|cwd| Some(sql.and_where_eq("cwd", quote(cwd))));
+        filter_options
+            .exclude_cwd
+            .map(|exclude_cwd| Some(sql.and_where_ne("cwd", quote(exclude_cwd))));
 
-        exclude_cwd.map(|exclude_cwd| Some(sql.and_where_ne("cwd", quote(exclude_cwd))));
-
-        before.map(|before| {
+        filter_options.before.map(|before| {
             interim::parse_date_string(before.as_str(), Utc::now(), interim::Dialect::Uk)
                 .map(|before| sql.and_where_lt("timestamp", quote(before.timestamp_nanos())))
         });
 
-        after.map(|after| {
+        filter_options.after.map(|after| {
             interim::parse_date_string(after.as_str(), Utc::now(), interim::Dialect::Uk)
                 .map(|after| sql.and_where_gt("timestamp", quote(after.timestamp_nanos())))
         });
@@ -538,7 +534,15 @@ mod test {
         };
 
         let results = db
-            .search(None, mode, filter_mode, &context, query, None)
+            .search(
+                mode,
+                filter_mode,
+                &context,
+                query,
+                OptFilters {
+                    ..Default::default()
+                },
+            )
             .await?;
 
         assert_eq!(
@@ -743,12 +747,13 @@ mod test {
         let start = Instant::now();
         let _results = db
             .search(
-                None,
                 SearchMode::Fuzzy,
                 FilterMode::Global,
                 &context,
                 "",
-                None,
+                OptFilters {
+                    ..Default::default()
+                },
             )
             .await
             .unwrap();

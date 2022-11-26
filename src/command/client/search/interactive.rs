@@ -17,9 +17,9 @@ use tui::{
 use unicode_width::UnicodeWidthStr;
 
 use atuin_client::{
-    database::current_context,
     database::Context,
     database::Database,
+    database::{current_context, OptFilters},
     history::History,
     settings::{ExitMode, FilterMode, SearchMode, Settings},
 };
@@ -55,12 +55,14 @@ impl State {
                 .await?
         } else {
             db.search(
-                Some(200),
                 search_mode,
                 self.filter_mode,
                 &self.context,
                 i,
-                None,
+                OptFilters {
+                    limit: Some(200),
+                    ..Default::default()
+                },
             )
             .await?
         };

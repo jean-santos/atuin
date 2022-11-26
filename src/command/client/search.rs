@@ -68,20 +68,19 @@ impl Cmd {
             eprintln!("{}", item);
         } else {
             let list_mode = ListMode::from_flags(self.human, self.cmd_only);
-            let entries = run_non_interactive(
-                settings,
-                list_mode,
-                self.cwd,
-                self.exit,
-                self.exclude_exit,
-                self.exclude_cwd,
-                self.before,
-                self.after,
-                self.limit,
-                &self.query,
-                db,
-            )
-            .await?;
+
+            let opt_filter = OptFilters {
+                exit: self.exit,
+                exclude_exit: self.exclude_exit,
+                cwd: self.cwd,
+                exclude_cwd: self.exclude_cwd,
+                before: self.before,
+                after: self.after,
+                limit: self.limit,
+            };
+
+            let entries =
+                run_non_interactive(settings, list_mode, opt_filter, &self.query, db).await?;
             if entries == 0 {
                 std::process::exit(1)
             }
@@ -96,45 +95,34 @@ impl Cmd {
 async fn run_non_interactive(
     settings: &Settings,
     list_mode: ListMode,
-    cwd: Option<String>,
-    exit: Option<i64>,
-    exclude_exit: Option<i64>,
-    exclude_cwd: Option<String>,
-    before: Option<String>,
-    after: Option<String>,
-    limit: Option<i64>,
+    filter_options: OptFilters,
     query: &[String],
     db: &mut impl Database,
 ) -> Result<usize> {
-    let dir = if cwd.as_deref() == Some(".") {
+    let dir = if filter_options.cwd.as_deref() == Some(".") {
         let current = std::env::current_dir()?;
         let current = current.as_os_str();
         let current = current.to_str().unwrap();
 
         Some(current.to_owned())
     } else {
-        cwd
+        filter_options.cwd
+    };
+
+    let opt_filter = OptFilters {
+        cwd: dir,
+        ..filter_options
     };
 
     let context = current_context();
 
-    let opt_filter = OptFilters {
-        exit,
-        exclude_exit,
-        cwd: dir,
-        exclude_cwd,
-        before,
-        after,
-    };
-
     let results = db
         .search(
-            limit,
             settings.search_mode,
             settings.filter_mode,
             &context,
             query.join(" ").as_str(),
-            Some(opt_filter),
+            opt_filter,
         )
         .await?;
 
