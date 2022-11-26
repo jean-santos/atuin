@@ -471,19 +471,19 @@ impl Database for Sqlite {
 
         filter_options
             .exit
-            .map(|exit| Some(sql.and_where_eq("exit", exit)));
+            .map(|exit| sql.and_where_eq("exit", exit));
 
         filter_options
             .exclude_exit
-            .map(|exclude_exit| Some(sql.and_where_ne("exit", exclude_exit)));
+            .map(|exclude_exit| sql.and_where_ne("exit", exclude_exit));
 
         filter_options
             .cwd
-            .map(|cwd| Some(sql.and_where_eq("cwd", quote(cwd))));
+            .map(|cwd| sql.and_where_eq("cwd", quote(cwd)));
 
         filter_options
             .exclude_cwd
-            .map(|exclude_cwd| Some(sql.and_where_ne("cwd", quote(exclude_cwd))));
+            .map(|exclude_cwd| sql.and_where_ne("cwd", quote(exclude_cwd)));
 
         filter_options.before.map(|before| {
             interim::parse_date_string(before.as_str(), Utc::now(), interim::Dialect::Uk)
