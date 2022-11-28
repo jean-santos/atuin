@@ -7,10 +7,13 @@ use itertools::Itertools;
 use lazy_static::lazy_static;
 use regex::Regex;
 use sql_builder::{esc, quote, SqlBuilder, SqlName};
+
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteRow},
     Result, Row,
 };
+
+use crate::async_query::async_query;
 
 use super::{
     event::{Event, EventType},
@@ -90,6 +93,17 @@ pub trait Database: Send + Sync {
     ) -> Result<Vec<History>>;
 
     async fn query_history(&self, query: &str) -> Result<Vec<History>>;
+
+    async fn get_stream_query<F>(&self, query: &str, fun : F) -> Result<usize> where F: Fn(History) -> () + Send + Sync;
+
+    fn get_query(
+        &self,
+        search_mode: SearchMode,
+        filter: FilterMode,
+        context: &Context,
+        query: &str,
+        filter_options: OptFilters,
+    ) -> Result<String>;
 }
 
 // Intended for use on a developer machine and not a sync server.
@@ -183,8 +197,10 @@ impl Sqlite {
     }
 }
 
+
 #[async_trait]
 impl Database for Sqlite {
+
     async fn save(&mut self, h: &History) -> Result<()> {
         debug!("saving history to sqlite");
         let event = Event::new_create(h);
@@ -503,6 +519,121 @@ impl Database for Sqlite {
             .await?;
 
         Ok(ordering::reorder_fuzzy(search_mode, orig_query, res))
+    }
+
+    async fn get_stream_query<F>(&self, query: &str, fun : F) -> Result<usize>
+    where F: Fn(History) -> () + Send + Sync
+    {
+        async_query(query, &self.pool,|sqliter|{
+            let history = Self::query_history(sqliter);
+            fun(history);
+        }).await
+    }
+
+    fn get_query(
+        &self,
+        search_mode: SearchMode,
+        filter: FilterMode,
+        context: &Context,
+        query: &str,
+        filter_options: OptFilters,
+    ) -> Result<String> {
+        let mut sql = SqlBuilder::select_from("history");
+
+        sql.group_by("command")
+            .having("max(timestamp)")
+            .order_desc("timestamp");
+
+        if let Some(limit) = filter_options.limit {
+            sql.limit(limit);
+        }
+
+        match filter {
+            FilterMode::Global => &mut sql,
+            FilterMode::Host => sql.and_where_eq("hostname", quote(&context.hostname)),
+            FilterMode::Session => sql.and_where_eq("session", quote(&context.session)),
+            FilterMode::Directory => sql.and_where_eq("cwd", quote(&context.cwd)),
+        };
+
+        let orig_query = query;
+        let query = query.replace('*', "%"); // allow wildcard char
+
+        match search_mode {
+            SearchMode::Prefix => sql.and_where_like_left("command", query),
+            SearchMode::FullText => sql.and_where_like_any("command", query),
+            SearchMode::Fuzzy => {
+                // don't recompile the regex on successive calls!
+                lazy_static! {
+                    static ref SPLIT_REGEX: Regex = Regex::new(r" +").unwrap();
+                }
+
+                let mut is_or = false;
+                for query_part in SPLIT_REGEX.split(query.as_str()) {
+                    // TODO smart case mode could be made configurable like in fzf
+                    let (is_glob, glob) = if query_part.contains(char::is_uppercase) {
+                        (true, "*")
+                    } else {
+                        (false, "%")
+                    };
+
+                    let (is_inverse, query_part) = match query_part.strip_prefix('!') {
+                        Some(stripped) => (true, stripped),
+                        None => (false, query_part),
+                    };
+
+                    let param = if query_part == "|" {
+                        if !is_or {
+                            is_or = true;
+                            continue;
+                        } else {
+                            format!("{glob}|{glob}")
+                        }
+                    } else if let Some(term) = query_part.strip_prefix('^') {
+                        format!("{term}{glob}")
+                    } else if let Some(term) = query_part.strip_suffix('$') {
+                        format!("{glob}{term}")
+                    } else if let Some(term) = query_part.strip_prefix('\'') {
+                        format!("{glob}{term}{glob}")
+                    } else if is_inverse {
+                        format!("{glob}{term}{glob}", term = query_part)
+                    } else {
+                        query_part.split("").join(glob)
+                    };
+
+                    sql.fuzzy_condition("command", param, is_inverse, is_glob, is_or);
+                    is_or = false;
+                }
+                &mut sql
+            }
+        };
+
+        filter_options
+            .exit
+            .map(|exit| sql.and_where_eq("exit", exit));
+
+        filter_options
+            .exclude_exit
+            .map(|exclude_exit| sql.and_where_ne("exit", exclude_exit));
+
+        filter_options
+            .cwd
+            .map(|cwd| sql.and_where_eq("cwd", quote(cwd)));
+
+        filter_options
+            .exclude_cwd
+            .map(|exclude_cwd| sql.and_where_ne("cwd", quote(exclude_cwd)));
+
+        filter_options.before.map(|before| {
+            interim::parse_date_string(before.as_str(), Utc::now(), interim::Dialect::Uk)
+                .map(|before| sql.and_where_lt("timestamp", quote(before.timestamp_nanos())))
+        });
+
+        filter_options.after.map(|after| {
+            interim::parse_date_string(after.as_str(), Utc::now(), interim::Dialect::Uk)
+                .map(|after| sql.and_where_gt("timestamp", quote(after.timestamp_nanos())))
+        });
+
+        Ok(sql.sql().expect("bug in search query. please report"))
     }
 
     async fn query_history(&self, query: &str) -> Result<Vec<History>> {

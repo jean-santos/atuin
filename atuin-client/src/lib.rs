@@ -16,3 +16,4 @@ pub mod history;
 pub mod import;
 pub mod ordering;
 pub mod settings;
+pub mod async_query;

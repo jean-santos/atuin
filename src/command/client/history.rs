@@ -93,6 +93,15 @@ pub fn print_list(h: &[History], list_mode: ListMode) {
 }
 
 #[allow(clippy::cast_sign_loss)]
+pub fn print_single(h: &History, list_mode: ListMode) {
+    let w = std::io::stdout();
+    let mut w = w.lock();
+    print_cmd_only_single(&mut w, h);
+
+    w.flush().expect("failed to flush history");
+}
+
+#[allow(clippy::cast_sign_loss)]
 pub fn print_human_list(w: &mut StdoutLock, h: &[History]) {
     for h in h.iter().rev() {
         let duration = format_duration(Duration::from_nanos(std::cmp::max(h.duration, 0) as u64));
@@ -120,6 +129,10 @@ pub fn print_cmd_only(w: &mut StdoutLock, h: &[History]) {
     for h in h.iter().rev() {
         writeln!(w, "{}", h.command.trim()).expect("failed to write history");
     }
+}
+
+pub fn print_cmd_only_single(w: &mut StdoutLock, h: &History) {
+    writeln!(w, "{}", h.command.trim()).expect("failed to write history");
 }
 
 impl Cmd {

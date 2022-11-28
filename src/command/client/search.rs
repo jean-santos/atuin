@@ -4,9 +4,9 @@ use eyre::Result;
 use atuin_client::{
     database::Database,
     database::{current_context, OptFilters},
-    settings::Settings,
+    settings::Settings
 };
-
+use eyre::eyre;
 use super::history::ListMode;
 
 mod cursor;
@@ -115,17 +115,19 @@ async fn run_non_interactive(
     };
 
     let context = current_context();
+    let query: String = db
+    .get_query(
+        settings.search_mode,
+        settings.filter_mode,
+        &context,
+        query.join(" ").as_str(),
+        opt_filter,
+    )
+    .unwrap();
 
-    let results = db
-        .search(
-            settings.search_mode,
-            settings.filter_mode,
-            &context,
-            query.join(" ").as_str(),
-            opt_filter,
-        )
-        .await?;
+    let r = db.get_stream_query(&query, |v|{
+        super::history::print_single(&v,list_mode);
+    }).await.map_err(|_| eyre!("Query stream failed"))?;
 
-    super::history::print_list(&results, list_mode);
-    Ok(results.len())
+    Ok(r)
 }

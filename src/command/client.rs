@@ -36,7 +36,7 @@ pub enum Cmd {
 }
 
 impl Cmd {
-    #[tokio::main(flavor = "current_thread")]
+    #[tokio::main]
     pub async fn run(self) -> Result<()> {
         pretty_env_logger::init();
 
